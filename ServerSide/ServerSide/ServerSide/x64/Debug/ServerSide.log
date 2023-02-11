@@ -1,0 +1,3 @@
+﻿  Server.cpp
+C:\Magshimim\CPP\homework-week-13\ServerSide\ServerSide\ServerSide\Server.cpp(160,26): warning C4101: 'e': unreferenced local variable
+  ServerSide.vcxproj -> C:\Magshimim\CPP\homework-week-13\ServerSide\ServerSide\x64\Debug\ServerSide.exe
