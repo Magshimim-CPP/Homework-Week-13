@@ -174,8 +174,6 @@ Output: none
 */
 void Server::messagesHandler()
 {
-	//setting local function variables.
-	stringstream fileContent;
 
 	while (true) //infinite loop.
 	{
@@ -206,6 +204,7 @@ void Server::messagesHandler()
 
 		
 		ifstream file(path); //opening the file related to the current chat's path
+		stringstream fileContent;
 		fileContent << (file.rdbuf()); //reading the file's stream to a string stream variable (will be converted and sent as a regular string).
 
 		//sending an update message to the user with all needed info. (according to the protocol).

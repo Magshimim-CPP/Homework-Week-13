@@ -1,0 +1,1190 @@
+import math
+ 
+def battlefront(game):
+    min_distance = 1000
+    battlefront = []
+    my_ices = game.get_my_icebergs()
+    for i in range(2):
+        front_ice = []
+        for enemy_ice in game.get_enemy_icebergs():
+            for my_ice in my_ices:
+                distance = calc_real_dis(enemy_ice, my_ice)
+                if distance < min_distance:
+                    min_distance = distance
+                    front_ice = my_ice
+        if front_ice:
+            battlefront.append(front_ice)
+            my_ices.remove(front_ice)
+            min_distance = 1000
+    return battlefront
+ 
+ 
+def base_ice(game):
+    mx = 0
+    base = []
+    for ice in game.get_neutral_icebergs() + game.get_my_icebergs():
+        for enemy_ice in game.get_enemy_icebergs():
+            distance = ice.get_turns_till_arrival(enemy_ice)
+            if distance > mx:
+                mx = distance
+                base = ice
+    return base
+ 
+ 
+def new_front(game, FRONT_INIT_LEN):
+    rear = []
+    base = base_ice(game)
+    flag = False
+    icebergs = game.get_all_icebergs()
+    icebergs.sort(key=lambda x: x.get_turns_till_arrival(base))
+ 
+    for ice in icebergs[:FRONT_INIT_LEN]:
+        rear.append(ice)
+        if ice not in game.get_my_icebergs():
+            flag = True
+ 
+    if flag:
+        return rear
+ 
+    return icebergs
+ 
+ 
+def upgrade_reinforcement(game, positive_icebergs, front, DISTANCE):
+ 
+    if sum_levels(game.get_my_icebergs()) < sum_levels(game.get_enemy_icebergs()):
+        temp = sorted(game.get_my_icebergs(), key=lambda x: x.penguins_per_turn)
+        lev = temp[0].penguins_per_turn
+        index = 0
+        for ice in temp:
+            if ice.penguins_per_turn > lev:
+                break
+            index += 1
+        poor = temp[:index]
+        good = temp[index:]
+        for pos in positive_icebergs:
+            if pos.iceberg in good:
+                poor.sort(key=lambda x: x.get_turns_till_arrival(pos.iceberg))
+                for poor_ice in poor:
+                    if poor_ice.get_turns_till_arrival(pos.iceberg) > DISTANCE:
+                        break
+                    if pos.iceberg.penguin_amount == pos.iceberg.max_penguins:
+                        amount_to_send = pos.iceberg.penguins_per_turn
+                    else:
+                        amount_to_send = 1
+                    if pos.iceberg.can_send_penguins(poor_ice, amount_to_send):
+                        pos.iceberg.send_penguins(poor_ice, amount_to_send)
+                        break
+ 
+ 
+def reinforcement(game, positive_icebergs, negative_icebergs, DISTANCE):
+ 
+    avg_amount = average_peng(game.get_enemy_icebergs())
+    my_level = sum_levels(game.get_my_icebergs())
+    enemy_level = sum_levels(game.get_enemy_icebergs())
+    my_penguin_sum = sum_peng(game.get_my_icebergs())
+    enemy_penguin_sum = sum_peng(game.get_enemy_icebergs())
+    positive = positive_icebergs[:]
+    front = battlefront(game)
+ 
+    for ice in positive:
+        flag = True
+        max_attack = 0
+        for enemy_ice in game.get_enemy_icebergs():
+            attack = ice.iceberg.penguin_amount - ice.peng_amount + \
+                     ice.iceberg.penguins_per_turn*calc_real_dis(enemy_ice, ice.iceberg) - enemy_ice.penguin_amount
+            if attack * -1 > max_attack:
+                max_attack = attack * -1
+        redundant = ice.peng_amount - max_attack - 1
+        if my_penguin_sum > 1.5 * enemy_penguin_sum and my_penguin_sum - enemy_penguin_sum > 200:
+            amount_to_send = ice.peng_amount / 4
+        else:
+            amount_to_send = min(ice.iceberg.penguin_amount - avg_amount, redundant)
+        if amount_to_send <= 0 or ice.iceberg.penguins_per_turn < 4:
+            flag = False
+        for neg in negative_icebergs:
+            if neg.iceberg in game.get_my_icebergs() and calc_real_dis(ice.iceberg, neg.iceberg) < DISTANCE:
+                flag = False
+                break
+        for neu in game.get_neutral_icebergs():
+            if calc_real_dis(ice.iceberg, neu) < DISTANCE:
+                flag = False
+                break
+        if not flag and ice.iceberg.penguin_amount == ice.iceberg.max_penguins:
+            flag = True
+            amount_to_send = ice.iceberg.penguins_per_turn
+        if ice.iceberg in front:
+            flag = False
+        if flag:
+            count = 0 
+            for my_ice in front:
+                if calc_real_dis(my_ice, ice.iceberg) < DISTANCE:
+                    count += 1
+            if count:
+                part_amount = int(amount_to_send / count)
+                if part_amount < 3:
+                    part_amount = amount_to_send
+                    flag = False
+                for my_ice in front:
+                    if my_ice.penguin_amount == my_ice.max_penguins:
+                        continue
+                    if part_amount and calc_real_dis(my_ice, ice.iceberg) < DISTANCE:
+                        ice.iceberg.send_penguins(my_ice, part_amount)
+                        if ice in positive_icebergs:
+                            positive_icebergs.remove(ice)
+                        if not flag:
+                            break
+ 
+ 
+def front_need_help_from_you(game, ice, front, negative_icebergs, DISTANCE):
+ 
+    if len(front) != len(game.get_all_icebergs()):
+        for neg in negative_icebergs:
+            if neg.iceberg in front and neg.iceberg.get_turns_till_arrival(ice.iceberg) < DISTANCE:
+                return True
+    return False
+ 
+ 
+def front_need_help(game, front, negative_icebergs, DISTANCE):
+    """
+    if sum_levels(game.get_my_icebergs()) < sum_levels(game.get_enemy_icebergs()):
+        return True
+    """
+    if len(front) == len(game.get_all_icebergs()):
+        return False
+    for neg in negative_icebergs:
+        if neg.iceberg in front and neg.iceberg not in game.get_neutral_icebergs():
+            return True
+    for red in game.get_enemy_icebergs():
+        if red in front:
+            return True
+    return False
+ 
+ 
+def minimal_front(game, FRONT_INIT_LEN):
+    rear = []
+    base = base_ice(game)
+    flag = False
+    icebergs = game.get_all_icebergs()
+    icebergs.sort(key=lambda x: x.get_turns_till_arrival(base))
+ 
+    for ice in icebergs[:FRONT_INIT_LEN]:
+        rear.append(ice)
+ 
+    return rear
+ 
+ 
+def is_edge(game, ice):
+    my_icebergs = game.get_my_icebergs()
+    icebergs = sorted(game.get_all_icebergs(), key=lambda x: x.get_turns_till_arrival(ice))
+    neighbor1 = icebergs[1]
+    neighbor2 = icebergs[2]
+    if neighbor1 not in my_icebergs or neighbor2 not in my_icebergs:
+        return True
+    return False
+ 
+ 
+def neighbors(game, ice):
+    my_icebergs = game.get_my_icebergs()
+    icebergs = sorted(game.get_all_icebergs(), key=lambda x: x.get_turns_till_arrival(ice))
+    return icebergs[1:3]
+def final_penguins_num_for_neutral(game, ice, my_arrival_turn=-1, until_turn=300, groups=[]):
+    """
+    return the number of penguins on "ice" after all the penguins groups that heading toward it will arrive,
+    and a flag to state if "ice" is still neutral in the end
+    negative number - penguins belong to the enemy
+    positive number - penguins belong to me or to nobody
+    "until_turn" - optional parameter to determine how many turns to check
+    """
+    status = "neutral"
+    last_status = status
+    my_penguin_amount = ice.penguin_amount
+    last_group_turns_till_arrival = 0
+    groups_toward_ice = [g for g in game.get_all_penguin_groups() if g.destination.equals(ice)]
+    groups_toward_ice.sort(key=lambda g: some(g, groups))
+    for g in groups_toward_ice:
+ 
+        if g not in groups:
+            g_turn_till_arrival = real_turn_teal_arrival(g)
+        else:
+            g_turn_till_arrival = illusion_turn_teal_arrival(g)
+ 
+        if g_turn_till_arrival >= until_turn:
+            return status == "neutral"
+ 
+        if status == "mine":
+            my_penguin_amount += (g_turn_till_arrival - last_group_turns_till_arrival) * ice.penguins_per_turn
+        elif status == "enemy":
+            my_penguin_amount -= (g_turn_till_arrival - last_group_turns_till_arrival) * ice.penguins_per_turn
+ 
+        if g_turn_till_arrival == last_group_turns_till_arrival and last_status == "neutral":
+            aaa = g.penguin_amount
+            if g in game.get_enemy_penguin_groups():
+                aaa *= -1
+            my_penguin_amount = last_group_amount+aaa
+ 
+        if status == "neutral" and g_turn_till_arrival != last_group_turns_till_arrival:
+            my_penguin_amount -= g.penguin_amount
+            if my_penguin_amount < 0:
+                if g in game.get_my_penguin_groups():
+                    my_penguin_amount *= -1
+            else:
+                last_group_turns_till_arrival = g_turn_till_arrival
+                last_group_amount = g.penguin_amount
+                last_status = status
+                if g in game.get_enemy_penguin_groups():
+                    last_group_amount *= -1
+                continue
+        else:
+            if g in game.get_enemy_penguin_groups():
+                my_penguin_amount -= g.penguin_amount
+            else:
+                my_penguin_amount += g.penguin_amount
+ 
+        last_group_turns_till_arrival = g_turn_till_arrival
+        last_group_amount = g.penguin_amount
+        last_status = status
+        if g in game.get_enemy_penguin_groups():
+            last_group_amount *= -1
+ 
+        if my_penguin_amount > 0:
+            status = "mine"
+        elif my_penguin_amount == 0:
+            status = "neutral"
+        else:
+            status = "enemy"
+ 
+    if until_turn != 300:
+        return status == "neutral"
+    if status == "neutral":
+        return my_penguin_amount, True
+    elif my_arrival_turn == -1 or my_arrival_turn < last_group_turns_till_arrival:
+        return my_penguin_amount, False
+    else:
+        if status == "mine":
+            return my_penguin_amount + (my_arrival_turn - last_group_turns_till_arrival) * ice.penguins_per_turn, False
+        else:
+            return my_penguin_amount - (my_arrival_turn - last_group_turns_till_arrival) * ice.penguins_per_turn, False
+ 
+ 
+def do_neutral(positive_icebergs, negative_icebergs, neutral_icebergs, game, DISTANCE, SPARE, front, min_front):
+    for my_ice in positive_icebergs:
+        can = False
+ 
+        neutral_icebergs.sort(key=lambda x: calc_real_dis(my_ice.iceberg, x) + x.penguin_amount)
+        for ice in neutral_icebergs:
+            if ice not in front:
+                continue
+            flag = True
+            if len(min_front) != len(game.get_all_icebergs()):
+                for f in min_front:
+                    if f in neutral_icebergs and f.penguins_per_turn > ice.penguins_per_turn and \
+                            calc_real_dis(my_ice.iceberg, f) < DISTANCE:
+                        flag = False
+                        break
+            if flag:
+                amount = ice.penguin_amount + SPARE
+                if ice not in min_front or front_need_help(game, min_front, negative_icebergs, DISTANCE):
+                    amount += 20
+                else:
+                    for ene in game.get_enemy_icebergs():
+                        if abs(calc_real_dis(ene, ice)-calc_real_dis(my_ice.iceberg, ice)) < 5:
+                            amount += ene.penguin_amount
+                            break
+                if my_ice.peng_amount + SPARE > amount and my_ice.peng_amount > amount + SPARE and \
+                        DISTANCE > calc_real_dis(my_ice.iceberg, ice):
+                    dest = ice
+                    can = True
+                    break
+        if can:
+            my_ice.iceberg.send_penguins(dest, amount)
+            positive_icebergs.remove(my_ice)
+            neutral_icebergs.remove(dest)
+    return positive_icebergs, neutral_icebergs 
+ 
+def generate_num_icebergs(i_num, l):
+    """
+    a helper function to build and return all of the subset of icebergs and i_num >= len(subset)
+    """
+    base = []
+    lists = [base]
+    for i in range(len(l)):
+        orig = lists[:]
+        new = l[i]
+        for j in range(len(lists)):
+            if len(lists[j]) <= i_num:
+                lists[j] = lists[j] + [new]
+        lists = orig + lists
+ 
+    lists = list(filter(lambda lst: len(lst) == i_num, lists))
+    return lists
+ 
+ 
+def calc_max_dis(icebergs):
+    """
+    this function calculate and return the maximum distance between the icebergs in the game
+    """
+    n = len(icebergs)
+    m = -1
+    for i in range(n):
+        for j in range(i+1, n):
+            m = max(m, icebergs[i].get_turns_till_arrival(icebergs[j]))
+    return m
+ 
+ 
+def average_peng(icebergs):
+    """
+    this function calc the average of the penguin amount to a list of icebergs
+    """
+    if not icebergs:
+        return 0
+    return int(sum([i.penguin_amount for i in icebergs])/len(icebergs))
+ 
+ 
+def sum_levels(icebergs):
+    sm = 0
+    for ice in icebergs:
+        sm += ice.penguins_per_turn
+    return sm
+ 
+ 
+def sum_peng(icebergs):
+    sm = 0
+    for ice in icebergs:
+        sm += ice.penguin_amount
+    return sm
+ 
+ 
+def find_bridge(source, destination):
+    """
+    this fuction get source and destination and find their bridge,
+    if the bridge is not exist the function return None
+    """
+ 
+    for b in source.bridges:
+        if destination in b.get_edges():
+            return b
+    return None
+ 
+ 
+def calc_real_dis(source, destination):
+    """
+    this function calc the distance include the bridges.
+    """
+    dis = source.get_turns_till_arrival(destination)
+    b = find_bridge(source, destination)
+    if not b:
+        b = find_bridge(destination, source)
+        if not b:
+            return dis
+    if b.duration >= dis/b.speed_multiplier:
+        return int(dis/b.speed_multiplier)
+ 
+    real_dis = b.duration + (dis-int(b.duration*b.speed_multiplier))
+    return real_dis
+ 
+ 
+def calc_illuse_dis(source, destination):
+    """
+    this function calc the distance include the bridges.
+    """
+    dis = source.get_turns_till_arrival(destination)
+    duration = source.max_bridge_duration
+    if duration >= dis/source.bridge_speed_multiplier:
+        return int(dis/source.bridge_speed_multiplier)
+ 
+    real_dis = duration + (dis-int(duration*source.bridge_speed_multiplier))
+    return real_dis
+ 
+ 
+def real_turn_teal_arrival(group):
+ 
+    dis = group.turns_till_arrival
+    b = find_bridge(group.source, group.destination)
+    if not b:
+        return dis
+    duration = b.duration - 1
+    if duration >= dis/b.speed_multiplier:
+        x = dis/b.speed_multiplier
+        return int(x) + (1 if x - int(x) > 0 else 0)
+    return duration + (dis-int(duration*b.speed_multiplier))
+ 
+ 
+def illusion_turn_teal_arrival(group):
+ 
+    dis = group.turns_till_arrival
+    duration = group.source.max_bridge_duration - 1
+    if duration >= dis/group.source.bridge_speed_multiplier:
+        x = dis/group.source.bridge_speed_multiplier
+        return int(x) + (1 if x - int(x) > 0 else 0)
+    return duration + (dis-int(duration*group.source.bridge_speed_multiplier))
+ 
+ 
+def final_penguins_num(game, ice, my_arrival_turn=300, my_amount=0, until_turn=300):
+    """
+    return the number of penguins on "ice" after all the penguins groups that heading toward it will arive
+    negative number - penguins belong to the enemy
+    positive number - penguins belong to me
+    "until_turn" - optional parameter to determine how many turns to check
+    """
+    if ice in game.get_my_icebergs():
+        status = "mine"
+    elif ice in game.get_neutral_icebergs():
+        status = "neutral"
+    else:
+        status = "enemy"
+    my_penguin_amount = ice.penguin_amount
+    if status == "enemy":
+        my_penguin_amount *= -1
+    last_group_turns_till_arrival = 0
+    groups_toward_ice = [g for g in game.get_all_penguin_groups() if g.destination.equals(ice)]
+    groups_toward_ice.sort(key=lambda g: real_turn_teal_arrival(g))
+    for g in groups_toward_ice:
+        if g in game.get_my_decoy_penguin_groups():
+            continue
+        g_arrival_turn = real_turn_teal_arrival(g)
+        if last_group_turns_till_arrival < my_arrival_turn < g_arrival_turn:
+            if status == "mine":
+                my_penguin_amount += (my_arrival_turn - last_group_turns_till_arrival) * ice.penguins_per_turn
+            elif status == "enemy":
+                my_penguin_amount -= (my_arrival_turn - last_group_turns_till_arrival) * ice.penguins_per_turn
+            my_penguin_amount += my_amount
+            if my_penguin_amount > 0:
+                status = "mine"
+            elif my_penguin_amount == 0:
+                status = "neutral"
+            else:
+                status = "enemy"
+            last_group_turns_till_arrival = my_arrival_turn
+ 
+        if until_turn < g_arrival_turn:
+            return my_penguin_amount
+ 
+        if status == "mine":
+            my_penguin_amount += (g_arrival_turn - last_group_turns_till_arrival) * ice.penguins_per_turn
+        elif status == "enemy":  # or status=="neutral":
+            my_penguin_amount -= (g_arrival_turn - last_group_turns_till_arrival) * ice.penguins_per_turn
+ 
+        if g in game.get_enemy_penguin_groups():
+            my_penguin_amount -= g.penguin_amount
+        else:
+            my_penguin_amount += g.penguin_amount
+ 
+        if my_penguin_amount > 0:
+            status = "mine"
+        elif my_penguin_amount == 0:
+            status = "neutral"
+        else:
+            status = "enemy"
+        last_group_turns_till_arrival = g_arrival_turn
+ 
+    if my_arrival_turn == 300 or my_arrival_turn < last_group_turns_till_arrival or status == "neutral":
+        return my_penguin_amount
+    else:
+        if status == "mine":
+            return my_penguin_amount + (my_arrival_turn - last_group_turns_till_arrival) * ice.penguins_per_turn
+        else:
+            return my_penguin_amount - (my_arrival_turn - last_group_turns_till_arrival) * ice.penguins_per_turn
+ 
+ 
+def dfs(visited, graph, node, res):
+    """
+    kind of dfs algorithm , return set of the icebergs that have a path from node
+    """
+    if node not in visited:
+        res.add(node)
+        visited.add(node)
+        for neighbour in graph[node]:
+            res = res.union(dfs(visited, graph, neighbour, res))
+    return res
+ 
+ 
+def good_distance(game, d):
+    """
+    return T/F if we can arrive from any iceberg to any iceberg with distance d.
+    """
+    graph = {}
+    icebergs = game.get_all_icebergs()
+ 
+    for ice in icebergs:
+        graph[ice] = []
+ 
+    for ice1 in icebergs:
+        for ice2 in icebergs:
+            if ice1.get_turns_till_arrival(ice2) <= d:
+                graph[ice1] += [ice2]
+ 
+    res = dfs(set(), graph, icebergs[0], set())
+ 
+    for ice in icebergs:
+        if ice not in res:
+            return False
+    return True
+ 
+ 
+def global_dis(game):
+    d = int(0.6*calc_max_dis(game.get_all_icebergs()))
+    while not good_distance(game, d):
+        d = int(1.1*d)
+    return d
+ 
+ 
+def some(g, groups):
+    if g not in groups:
+        return real_turn_teal_arrival(g)
+    return illusion_turn_teal_arrival(g)
+ 
+ 
+def final_penguins_num2(game, ice, my_arrival_turn=-1, groups=[]):
+    """
+    return the number of penguins on "ice" after all the penguins groups that heading toward it will arive
+    negative number - penguins belong to the enemy
+    positive number - penguins belong to me
+    "until_turn" - optional parameter to determine how many turns to check
+    """
+    if ice in game.get_my_icebergs():
+        status = "mine"
+    elif ice in game.get_neutral_icebergs():
+        status = "neutral"
+    else:
+        status = "enemy"
+    my_penguin_amount = ice.penguin_amount
+    if status == "enemy":
+        my_penguin_amount *= -1
+    last_group_turns_till_arrival = 0
+    groups_toward_ice = [g for g in game.get_all_penguin_groups() if g.destination.equals(ice)]
+    groups_toward_ice.sort(key=lambda g: some(g, groups))
+ 
+    temp = groups_toward_ice[:]
+    for g in temp:
+        if g not in groups:
+            total_d = calc_real_dis(g.source, ice)
+        else:
+            total_d = calc_illuse_dis(g.source, ice)
+        kizuz = [grp for grp in game.get_all_penguin_groups() if grp.source.equals(ice) and grp.destination.equals(g.source)]
+        for k in kizuz:
+            if g not in groups:
+                g_turn_till_arrival = real_turn_teal_arrival(g)
+            else:
+                g_turn_till_arrival = illusion_turn_teal_arrival(g)
+            if real_turn_teal_arrival(k) + g_turn_till_arrival >= total_d: 
+                kiz = g.penguin_amount - k.penguin_amount
+                if kiz < 0:
+                    kiz = 0
+                g.penguin_amount = kiz
+                groups_toward_ice[groups_toward_ice.index(g)].penguin_amount = kiz
+ 
+    for g in groups_toward_ice:
+        if g in game.get_my_decoy_penguin_groups():
+            continue
+        if g not in groups:
+            g_turn_till_arrival = real_turn_teal_arrival(g)
+        else:
+            g_turn_till_arrival = illusion_turn_teal_arrival(g)
+ 
+        if status == "mine":
+            my_penguin_amount += (g_turn_till_arrival - last_group_turns_till_arrival) * ice.penguins_per_turn
+        elif status == "enemy":  # or status=="neutral":
+            my_penguin_amount -= (g_turn_till_arrival - last_group_turns_till_arrival) * ice.penguins_per_turn
+ 
+        if g in game.get_enemy_penguin_groups():
+            my_penguin_amount -= g.penguin_amount
+        else:
+            my_penguin_amount += g.penguin_amount
+ 
+        if my_penguin_amount > 0:
+            status = "mine"
+        elif my_penguin_amount == 0:
+            status = "neutral"
+        else:
+            status = "enemy"
+        last_group_turns_till_arrival = g_turn_till_arrival
+ 
+    return my_penguin_amount, last_group_turns_till_arrival, status
+ 
+ 
+def calc_redundant_penguins(game, ice, my_level, enemy_level, my_penguin_sum, enemy_penguin_sum, threats):
+    """
+    return the number of penguins that are not needed for self defense (consider all enemy groups)
+    negative value means that there is no redundant penguins
+    """
+    my_penguin_amount = ice.penguin_amount
+    if my_level <= 1.5 * enemy_level or my_penguin_sum <= 1.5 * enemy_penguin_sum:
+        for enemy_ice in game.get_enemy_icebergs():
+            if enemy_ice not in threats:
+                attack = my_penguin_amount + ice.penguins_per_turn * calc_real_dis(enemy_ice, ice) - enemy_ice.penguin_amount
+                if attack < 0:
+                    return -1
+ 
+    redundant = 1000
+    enemy_penguin_groups = [group for group in game.get_enemy_penguin_groups() if group.destination.equals(ice)]
+    enemy_penguin_groups.sort(key=lambda group: real_turn_teal_arrival(group))
+    last_group_turns_till_arrival = 0
+    temp = my_penguin_amount
+    for group in enemy_penguin_groups:
+        temp += ice.penguins_per_turn * (real_turn_teal_arrival(group) - last_group_turns_till_arrival) - group.penguin_amount
+        if temp < redundant:
+            redundant = temp
+            if redundant <= 0:
+                return -1
+        last_group_turns_till_arrival = real_turn_teal_arrival(group)
+    redundant -= 1
+    if redundant > my_penguin_amount:
+        redundant = my_penguin_amount
+ 
+    return redundant
+ 
+ 
+def max_flow(C, s, t):
+    """
+        Edmonds-Karp Algorithm
+        :param C: 'capacity' of the network
+        :param s: source
+        :param t: 'pit'
+        :return: max flow (network)
+    """
+    n = len(C)  # C is the capacity matrix
+    F = [[0] * n for i in xrange(n)]
+    path = bfs(C, F, s, t)
+    while not path:
+        flow = min(C[u][v] - F[u][v] for u, v in path)
+        for u, v in path:
+            F[u][v] += flow
+            F[v][u] -= flow
+        path = bfs(C, F, s, t)
+    return F
+ 
+ 
+def bfs(C, F, s, t):
+    """
+    find path by using BFS
+    """
+    queue = [s]
+    paths = {s: []}
+    if s == t:
+        return paths[s]
+    while queue:
+        u = queue.pop(0)
+        for v in xrange(len(C)):
+                if C[u][v]-F[u][v] > 0 and v not in paths:
+                    paths[v] = paths[u]+[(u, v)]
+                    if v == t:
+                        return paths[v]
+                    queue.append(v)
+    return None
+ 
+ 
+def iceberg2rmv(flow, graph_negative, ice2index, t):
+    return ice2index[min(graph_negative.keys(), key=lambda x:flow[ice2index[x]][t]/x.peng_amount)]
+ 
+def attackby1(positive_icebergs, iceberg, game, DISTANCE, SPARE):
+    amount = iceberg.penguin_amount + SPARE
+    amount += sum([-1*x.penguin_amount if x.source in game.get_my_icebergs() else
+                   x.penguin_amount for x in game.get_all_penguin_groups() if x.destination.equals(iceberg)])
+    amount += iceberg.max_turns_to_bonus
+ 
+    if amount <= -5*iceberg.max_turns_to_bonus:
+        return positive_icebergs
+    elif amount <= 0:
+        amount = iceberg.max_turns_to_bonus + SPARE
+ 
+    lst=[t for t in positive_icebergs if t.peng_amount>amount]
+    lst.sort(key=lambda x: calc_real_dis(x.iceberg, iceberg))
+ 
+    if lst:
+        dest = iceberg
+        lst[0].iceberg.send_penguins(dest, amount)
+        if lst[0].peng_amount-amount > 1:
+            positive_icebergs[positive_icebergs.index(lst[0])].peng_amount -= amount
+        else:
+            positive_icebergs.remove(lst[0])
+    else:
+        lst = [t for t in positive_icebergs if calc_real_dis(t.iceberg, iceberg) <= DISTANCE*1.2]
+        lst.sort(key=lambda x: x.peng_amount)
+        if len(lst) > 1:
+            for i1 in range(len(lst)):
+                for i2 in range(i1+1, len(lst)):
+                    if lst[i1].peng_amount + lst[i2].peng_amount >= amount:
+                        lst[i1].iceberg.send_penguins(iceberg, lst[i1].peng_amount)
+                        lst[i2].iceberg.send_penguins(iceberg,
+                                                      amount - lst[i1].peng_amount if amount - lst[i1].peng_amount > 0
+                                                      else amount - lst[i1].peng_amount + 1)
+                        for indx in [i1, i2]:
+                            if lst[indx].peng_amount-amount > 1:
+                                positive_icebergs[positive_icebergs.index(lst[indx])].peng_amount -= amount
+                            else:
+                                positive_icebergs.remove(lst[indx])
+                        return positive_icebergs
+    return positive_icebergs
+ 
+ 
+def attack_and_protect(game, positive_icebergs, negative_icebergs, DISTANCE, SPARE, front):
+    # send penguins from positive_icebergs to negative_icebergs (prefers shortest distances)
+    min_distance = DISTANCE
+    source = 0
+    dest = 0
+    min_amount = 0
+    bad_pairs = []
+    enemy_avg = average_peng(game.get_enemy_icebergs())
+    negative_icebergs.sort(reverse=True, key=lambda x: x.iceberg.penguins_per_turn)
+    while True:
+        for d in negative_icebergs:
+            if d.iceberg not in front:
+                continue
+            for s in positive_icebergs:
+                distance = calc_real_dis(s.iceberg, d.iceberg)
+                if d.iceberg in game.get_neutral_icebergs():
+                    neutral = final_penguins_num_for_neutral(game, d.iceberg, distance, distance)
+                    amount = final_penguins_num_for_neutral(game, d.iceberg, distance)[0] * -1
+                    # if I will get to d when it is still neutral - do nothing
+                    if neutral:
+                        continue
+                else:
+                    if distance < d.turn or d.status == "neutral":
+                        amount = d.peng_amount
+                        if distance < d.turn and s.peng_amount <= d.peng_amount:
+                            X = final_penguins_num(game,d.iceberg,distance,s.peng_amount, 300)
+                            if X > 0:
+                                amount = s.peng_amount - SPARE
+                    elif d.status == "mine":
+                        amount = d.peng_amount + (distance - d.turn) * d.iceberg.penguins_per_turn
+                    else:
+                        amount = d.peng_amount*-1 - (distance - d.turn) * d.iceberg.penguins_per_turn
+                        amount *= -1
+ 
+                if s.peng_amount > amount and distance < min_distance and (s,d) not in bad_pairs:
+                    min_distance = distance
+                    min_amount = amount
+                    source = s
+                    dest = d
+ 
+        if min_distance != DISTANCE and 0 < min_amount < source.peng_amount:
+            min_distance = DISTANCE
+            for neg in negative_icebergs:
+                if neg.iceberg in front:
+                    if source.iceberg.get_turns_till_arrival(dest.iceberg)-source.iceberg.get_turns_till_arrival(neg.iceberg) > 5:
+                        bad_pairs.append((source, dest))
+                        break
+            if (source, dest) not in bad_pairs:
+                amout_to_send = min_amount + SPARE
+                if enemy_avg > amout_to_send and sum_levels(game.get_my_icebergs()) >= sum_levels(game.get_enemy_icebergs()):
+                    amout_to_send = min(int(enemy_avg), source.peng_amount)
+                source.iceberg.send_penguins(dest.iceberg, amout_to_send)
+                positive_icebergs.remove(source)
+                negative_icebergs.remove(dest)
+                bad_pairs1 = bad_pairs[:]
+                for bad in bad_pairs1:
+                    if bad[0].iceberg.get_turns_till_arrival(bad[1].iceberg) > bad[0].iceberg.get_turns_till_arrival(dest.iceberg):
+                        bad_pairs.remove(bad)
+        else:
+            break
+ 
+ 
+def worth_to_add_bridge(game, source, destination, negative_icebergs):
+    """
+    this function check if adding a bridge bwtween source and destination worth it
+    """
+    my_peng_groups = game.get_my_penguin_groups()
+ 
+    relevant = [group for group in my_peng_groups if
+                (group.source.equals(source.iceberg) and group.destination.equals(destination))]
+ 
+    if not relevant:
+        return False
+ 
+    relevant.sort(key=lambda x: x.turns_till_arrival)
+    negative = [ice.iceberg for ice in negative_icebergs]
+ 
+    if destination not in negative and destination in game.get_neutral_icebergs():
+        ene_g = [g for g in game.get_enemy_penguin_groups() if g.destination.equals(destination)]
+        if ene_g:
+            return False
+ 
+    if destination in negative:
+        if destination in game.get_neutral_icebergs():
+            if final_penguins_num_for_neutral(game, destination, -1, 300, relevant)[0] > 0:
+                negative_icebergs.remove([x for x in negative_icebergs if x.iceberg.equals(destination)][0])
+                return True
+        else:
+            if final_penguins_num2(game, destination, -1, relevant)[0] > 0:
+                negative_icebergs.remove([x for x in negative_icebergs if x.iceberg.equals(destination)][0])
+                return True
+ 
+    if source.peng_amount - source.iceberg.bridge_cost < 12:
+        return False
+    if relevant[-1].turns_till_arrival/source.iceberg.bridge_speed_multiplier >= 4 and \
+            sum([x.penguin_amount for x in relevant])/source.iceberg.get_turns_till_arrival(destination) >= 0.5:
+        return True
+    if source.iceberg.get_turns_till_arrival(destination) <= 8 and relevant[-1].turns_till_arrival >= 4 and \
+            sum([x.penguin_amount for x in relevant])/source.iceberg.get_turns_till_arrival(destination) >= 1.2:
+        return True
+    return False
+ 
+ 
+def build_bridges(game, positive_icebergs, negative_icebergs):
+    pis = positive_icebergs[:]
+    ens = game.get_enemy_icebergs() + game.get_neutral_icebergs()
+    for p in pis:
+        for n in ens:
+            if p.iceberg.can_create_bridge(n) and worth_to_add_bridge(game, p, n, negative_icebergs):
+                p.iceberg.create_bridge(n)
+                positive_icebergs.remove(p)
+                break
+    return positive_icebergs
+ 
+ 
+def team_work(game, positive_icebergs, negative_icebergs, DISTANCE, SPARE, front, min_front, base):
+    """
+    this function attack the the enemy with team work of the positive icebergs
+    """
+    dst1 = DISTANCE
+    fff = False
+    i_num = 2
+    if negative_icebergs:
+        temp = [x.peng_amount for x in negative_icebergs]
+        high = max(temp)
+        low = min(temp)
+        if high != low:
+            grade = lambda x: 0.2*(((x.peng_amount-low)/(high-low))*100) + 0.8*((x.iceberg.penguins_per_turn-1)*33.3333)
+            negative_icebergs = sorted(negative_icebergs, key=grade)[::-1]
+ 
+        while i_num <= 5 and i_num <= len(positive_icebergs):
+            temp_negative = negative_icebergs[::]
+            for e in temp_negative:
+                if e.iceberg in game.get_neutral_icebergs() or e.iceberg not in front:
+                    continue
+                if e.iceberg not in min_front:
+                    DISTANCE = dst1*(5/6)
+                    if base in positive_icebergs:
+                        positive_icebergs.remove(base)
+                        fff = True
+                elif fff:
+                    DISTANCE = dst1
+                    positive_icebergs.append(base)
+                    fff = False
+                else:
+                    DISTANCE = dst1
+                best_group = []
+                min_dis = int(DISTANCE*1.25) if i_num < len(positive_icebergs) else DISTANCE*100
+ 
+                for g in generate_num_icebergs(i_num, positive_icebergs):
+ 
+                    max_group_dis = max([calc_real_dis(i.iceberg, e.iceberg) for i in g])
+ 
+                    if max_group_dis < min_dis:
+ 
+                        if max_group_dis < e.turn or e.status == "neutral":
+                            amount = e.peng_amount
+                        elif e.status == "mine":
+                            amount = e.peng_amount + (max_group_dis - e.turn) * e.iceberg.penguins_per_turn
+                        else:
+                            amount = e.peng_amount*-1 - (max_group_dis - e.turn) * e.iceberg.penguins_per_turn
+                            amount *= -1
+ 
+                        if sum([i.peng_amount for i in g]) > amount + SPARE:
+                            min_dis = max_group_dis
+                            best_group = g
+ 
+                if best_group:
+                    if min_dis < e.turn or e.status == "neutral":
+                        amount = e.peng_amount
+                    elif e.status == "mine":
+                        amount = e.peng_amount + (min_dis - e.turn) * e.iceberg.penguins_per_turn
+                    else:
+                        amount = e.peng_amount*-1 - (min_dis - e.turn) * e.iceberg.penguins_per_turn
+                        amount *= -1
+                    p_count = amount + SPARE
+                    best_group.sort(key=lambda x: calc_real_dis(x.iceberg, e.iceberg))
+                    cc = 0
+                    for ice in best_group:
+                        if p_count > 0:
+                            if cc == 0 and ice.peng_amount >= p_count:
+                                break
+                            if ice.peng_amount > 0:
+ 
+                                if ice.peng_amount <= p_count:
+                                    ice.iceberg.send_penguins(e.iceberg, ice.peng_amount)
+                                    p_count -= ice.peng_amount
+                                    positive_icebergs.remove(ice)
+                                    if base and ice.iceberg.equals(base.iceberg):
+                                        fff = False
+                                else:
+                                    ice.iceberg.send_penguins(e.iceberg, p_count)
+                                    positive_icebergs[positive_icebergs.index(ice)].peng_amount -= p_count
+                                    p_count -= ice.peng_amount
+                                    ice = positive_icebergs[positive_icebergs.index(ice)]
+                                cc = 1
+                        else:
+                            break
+                    if cc == 1:
+                        negative_icebergs.remove(e)
+            i_num += 1
+    if fff:
+        positive_icebergs.append(base)
+    return positive_icebergs, negative_icebergs
+ 
+ 
+ 
+"""
+This is an example for a bot.
+"""
+from penguin_game import *
+from helper import *
+from attack import *
+from neutrals import *
+from rearFront import *
+ 
+ 
+def build_negative_list(game, positive_icebergs, myIce):
+ 
+    negative_icebergs = []
+    useless_icebergs = []
+ 
+    # check which of my icebergs needs help
+    for my_iceberg in game.get_my_icebergs():
+        if my_iceberg not in [ice.iceberg for ice in positive_icebergs]:
+            amount, turn, status = final_penguins_num2(game, my_iceberg)
+            if amount < 0:
+                negative_icebergs.append(myIce(my_iceberg, amount * -1, turn, status))
+            else:
+                useless_icebergs.append(myIce(my_iceberg, amount, -1, status))
+ 
+    # check which of the enemy icebergs will still be enemy consider the groups on the board
+    for ice in game.get_enemy_icebergs():
+        amount, turn, status = final_penguins_num2(game, ice)
+        if amount < 0:
+            negative_icebergs.append(myIce(ice, amount * -1, turn, status))
+        else:
+            enemy_icebergs = sorted(game.get_enemy_icebergs(), key=lambda x: x.get_turns_till_arrival(ice))
+            for enemy_ice in enemy_icebergs:
+                if enemy_ice != ice:
+                    attack = amount + ice.penguins_per_turn * calc_real_dis(enemy_ice, ice) - enemy_ice.penguin_amount
+                    if attack < 0:
+                        negative_icebergs.append(myIce(ice, (attack * -1), 300))
+                        break
+ 
+    neutral_icebergs = []
+    # get neutral that there are enemy in the way to them
+    for ice in game.get_neutral_icebergs():
+        amount, neutral = final_penguins_num_for_neutral(game, ice)
+        if not neutral and amount < 0:
+            negative_icebergs.append(myIce(ice, amount * -1))
+        elif neutral:
+            neutral_icebergs.append(ice)
+ 
+    return negative_icebergs, useless_icebergs, neutral_icebergs
+ 
+ 
+def predict_attack(game, ice, min_front, front):
+ 
+    if ice.iceberg in min_front and len(min_front) < len(front):
+        return ice.peng_amount
+    max_attack = 0
+    for enemy_ice in game.get_enemy_icebergs():
+        attack = ice.iceberg.penguin_amount - ice.peng_amount + \
+                 (ice.iceberg.penguins_per_turn+1)*calc_real_dis(enemy_ice, ice.iceberg) \
+                 + final_penguins_num(game, enemy_ice)
+        if attack * -1 > max_attack:
+            max_attack = attack * -1
+    redundant = ice.peng_amount - max_attack - 1
+    if redundant <= 0:
+        return -1
+    return redundant + 1
+ 
+ 
+def threat(game):
+ 
+    threats = []
+    for enemy_ice in game.get_enemy_icebergs():
+        count = 0
+        for ice in game.get_my_icebergs():
+            attack = ice.penguin_amount + ice.penguins_per_turn * calc_real_dis(enemy_ice, ice)\
+                     - enemy_ice.penguin_amount
+            if attack < 0:
+                count += 1
+            if count == 2:
+                break
+        if count == 2:
+            threats.append(enemy_ice)
+    return threats
+ 
+ 
+def do_turn(game):
+    """
+    Makes the bot run a single turn.
+    :param game: the current game state.
+    :type game: Game
+    """
+ 
+    # struct for the items in positive_icebergs and negative_icebergs
+    # contains the iceberg itself and the amount of redundant / needed penguins
+    class myIce:
+        def __init__(self, iceberg, peng_amount, turn=-1, status=""):
+            self.iceberg = iceberg
+            self.peng_amount = peng_amount
+            self.turn = turn
+            self.status = status
+ 
+        def __str__(self):
+            return 'iceberg: ' + str(self.iceberg) + ' , peng_amount: ' + str(self.peng_amount) + ' , turn: ' + str(self.turn) + ' , status: ' + str(self.status)
+ 
+    # GLOBAL PARAMETERS
+    SPARE = 1
+    ICEBERGS = len(game.get_all_icebergs())
+    DISTANCE = int(global_dis(game))
+    MY_LEVEL = sum_levels(game.get_my_icebergs())
+    ENEMY_LEVEL = sum_levels(game.get_enemy_icebergs())
+    MY_SUM = sum_peng(game.get_my_icebergs())
+    ENEMY_SUM = sum_peng(game.get_enemy_icebergs())
+    threats = threat(game)
+    bonus = game.get_bonus_iceberg()
+    passive_icebergs = game.get_my_icebergs()
+ 
+    if ICEBERGS == 5:
+        DISTANCE = 1000
+ 
+    FRONT_INIT_LEN = int(ICEBERGS / 2)
+    if (ICEBERGS != 10 and ICEBERGS != 8) or (ICEBERGS == 10 and not bonus):
+        FRONT_INIT_LEN = ICEBERGS
+ 
+    front = new_front(game, FRONT_INIT_LEN)
+    min_front = minimal_front(game, FRONT_INIT_LEN)
+    base_iceberg = base_ice(game)
+ 
+    if ICEBERGS == 12:
+        edgs = []
+        temp = []
+        for ice in game.get_my_icebergs():
+            if is_edge(game, ice):
+                edgs.append(ice)
+        for e in edgs:
+            temp.append(e)
+            e_neighbors = neighbors(game, e)
+            temp += e_neighbors
+            for e_nei in e_neighbors:
+                if e_nei not in game.get_enemy_icebergs():
+                    for e_nei_nei in neighbors(game, e_nei):
+                        if e_nei_nei in game.get_enemy_icebergs():
+                            temp.append(e_nei_nei)
+                            break
+        front = []
+        [front.append(x) for x in temp if x not in front]
+        min_front = front[:]
+        FRONT_INIT_LEN = 12
+ 
+    # check which of my icebergs has redundant penguins
+    positive_icebergs = []
+    for my_iceberg in game.get_my_icebergs():
+        redundant = calc_redundant_penguins(game, my_iceberg, MY_LEVEL, ENEMY_LEVEL, MY_SUM, ENEMY_SUM, threats)
+        if redundant > 0:
+            positive_icebergs.append(myIce(my_iceberg, redundant))
+ 
+    # build "negative_icebergs" list
+    negative_icebergs, useless_icebergs, neutral_icebergs = build_negative_list(game, positive_icebergs, myIce)
+ 
+    # prevent tie score
+    if ICEBERGS == 5 and game.turn > 250 and len(game.get_neutral_icebergs()) == 3:
+        pos = game.get_my_icebergs()[0]
+        neu = sorted(game.get_neutral_icebergs(), key=lambda x: x.get_turns_till_arrival(pos))[0]
+        ddd = calc_illuse_dis(pos, neu)
+        amount = pos.penguin_amount - pos.bridge_cost + 1
+        if 300-ddd == game.turn:
+            pos.send_penguins(neu, amount)
+        if 300-ddd+1 == game.turn:
+            pos.create_bridge(neu)
+        if 300-ddd <= game.turn:
+            return
+ 
+    if game.turn == 260 and len(game.get_my_icebergs()) == len(game.get_enemy_icebergs()) and\
+            len(game.get_my_icebergs()) >= 2 and MY_LEVEL == ENEMY_LEVEL:
+        poss = sorted(game.get_my_icebergs(), key=lambda x: x.penguin_amount)
+        pos1 = poss[-1]
+        pos2 = poss[-2]
+        negs = sorted(game.get_enemy_icebergs(), key=lambda x: x.penguin_amount)
+        neg1 = negs[0]
+        neg2 = negs[1]
+        pos1.send_decoy_penguins(neg1, neg2, int(pos1.penguin_amount/pos1.decoy_cost_factor)-1)
+        pos2.send_decoy_penguins(neg1, neg2, int(pos2.penguin_amount/pos2.decoy_cost_factor)-1)
+ 
+    icebergs2 = positive_icebergs[:]
+ 
+    # upgrade
+    if (float(len(game.get_enemy_icebergs()))/ICEBERGS) <= 0.5 and ICEBERGS != 5:
+        # upgrade if you can
+        positive = positive_icebergs[:]
+        for ice in positive:
+            if ICEBERGS == 12:
+                if is_edge(game, ice.iceberg):
+                    continue
+            if ice.iceberg.upgrade_cost <= predict_attack(game, ice, min_front, front) and \
+                    ice.iceberg.level < ice.iceberg.upgrade_level_limit and not \
+                    front_need_help_from_you(game, ice, front, negative_icebergs, DISTANCE):
+                ice.iceberg.upgrade()
+                positive_icebergs.remove(ice)
+ 
+        # do nothing if you are not upgraded
+        if ICEBERGS != 12:
+            positive = positive_icebergs[:]
+            for ice in positive:
+                if ice.iceberg.penguins_per_turn == 1 and not \
+                        front_need_help_from_you(game, ice, front, negative_icebergs, DISTANCE):
+                    positive_icebergs.remove(ice)
+                    icebergs2.remove(ice)
+ 
+    if MY_LEVEL < ENEMY_LEVEL:
+        front = min_front
+ 
+    # bonus
+    if bonus:
+        if not game.get_my_bonus_iceberg() and not game.get_neutral_bonus_iceberg() and len(front) == ICEBERGS:
+            positive_icebergs = attackby1(positive_icebergs, bonus, game, DISTANCE, SPARE)
+ 
+    # build_ bridges
+    positive_icebergs = build_bridges(game, positive_icebergs, negative_icebergs)
+ 
+    positive_icebergs2 = positive_icebergs[:]
+ 
+    # attack and protect
+    attack_and_protect(game, positive_icebergs, negative_icebergs, DISTANCE, SPARE, front)
+ 
+    base = []
+    for ice in positive_icebergs:
+        if ice.iceberg.equals(base_iceberg):
+            base = ice
+            break
+ 
+    # team work
+    positive_icebergs, negative_icebergs = team_work(game, positive_icebergs, negative_icebergs,
+                                                     DISTANCE, SPARE, front, min_front, base)
+ 
+    # attack neutrals
+    if ICEBERGS != 5 or len(neutral_icebergs) != 3:
+        do_neutral(positive_icebergs, negative_icebergs, neutral_icebergs, game, DISTANCE, SPARE, front, min_front)
+ 
+    if ICEBERGS == 5:
+        positive = positive_icebergs[:]
+        for ice in positive:
+            if ice.iceberg.upgrade_cost <= predict_attack(game, ice, min_front, front) and \
+                    ice.iceberg.level < ice.iceberg.upgrade_level_limit and not \
+                    front_need_help_from_you(game, ice, front, negative_icebergs, DISTANCE):
+                ice.iceberg.upgrade()
+                positive_icebergs.remove(ice)
+ 
+    # send reinforcements
+    reinforcement(game, positive_icebergs, negative_icebergs, DISTANCE)
+    if ICEBERGS != 5:
+        upgrade_reinforcement(game, positive_icebergs2, front, DISTANCE)
+ 
+    for pos in icebergs2:
+        if pos not in positive_icebergs:
+            passive_icebergs.remove(pos.iceberg)
+ 
+    temp5 = battlefront(game)[0]
+    enemy = game.get_enemy_icebergs()
+    enemy = sorted(enemy, key=lambda x: x.get_turns_till_arrival(temp5))[0]
+    for ice in passive_icebergs:
+        if ice.penguin_amount == ice.max_penguins:
+            if ice in positive_icebergs:
+                amount_to_send = [x.peng_amount for x in positive_icebergs if x.iceberg.equals(ice)][0]
+            else:
+                amount_to_send = ice.penguins_per_turn
+            ice.send_penguins(enemy, ice.penguins_per_turn)
